@@ -34,7 +34,7 @@ impl From<&OutputInfo> for DisplayInfo {
                 .name
                 .clone()
                 .unwrap_or(format!("Unknown Display {}", info.id)),
-            raw_handle: unsafe { xcb::randr::Output::new(info.id) },
+            raw_handle: xcb::randr::Output::new(info.id),
             x: ((x as f32) / scale_factor) as i32,
             y: ((y as f32) / scale_factor) as i32,
             width: ((w as f32) / scale_factor) as u32,
@@ -45,6 +45,7 @@ impl From<&OutputInfo> for DisplayInfo {
             scale_factor,
             frequency,
             is_primary: false,
+            is_builtin: false,
         }
     }
 }

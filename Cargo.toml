@@ -1,9 +1,9 @@
 [package]
 name = "display-info"
-version = "0.5.7"
+version = "0.5.8"
 edition = "2024"
 description = "Cross-platform get display info"
-license-file = "LICENSE"
+license = "Apache-2.0"
 documentation = "https://docs.rs/display-info"
 homepage = "https://github.com/nashaofu/display-info"
 repository = "https://github.com/nashaofu/display-info.git"
