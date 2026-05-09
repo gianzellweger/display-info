@@ -11,7 +11,34 @@ use crate::error::{DIError, DIResult};
 
 impl From<&OutputInfo> for DisplayInfo {
     fn from(info: &OutputInfo) -> Self {
-        let scale_factor = info.scale_factor as f32;
+        // Use the current mode's pixel dimensions for the true physical resolution.
+        // The logical_size from xdg-output is already divided by the fractional
+        // scale factor, so using it directly (as the original code did) and then
+        // dividing again by wl_output's integer scale produces a doubly-scaled value.
+        let (width, height) = info
+            .modes
+            .iter()
+            .find(|m| m.current)
+            .map(|m| (m.dimensions.0 as u32, m.dimensions.1 as u32))
+            .unwrap_or_else(|| {
+                let (w, h) = info.logical_size.unwrap_or(info.physical_size);
+                (w as u32, h as u32)
+            });
+
+        // Derive the true (possibly fractional) scale factor from the ratio of
+        // physical pixels to logical pixels. wl_output::scale is always an integer
+        // and does not reflect compositor-level fractional scaling.
+        let scale_factor = info
+            .logical_size
+            .and_then(|(lw, _)| {
+                info.modes
+                    .iter()
+                    .find(|m| m.current)
+                    .filter(|_| lw != 0)
+                    .map(|m| m.dimensions.0 as f32 / lw as f32)
+            })
+            .unwrap_or(info.scale_factor as f32);
+
         let rotation = match info.transform {
             wl_output::Transform::_90 | wl_output::Transform::Flipped90 => 90.,
             wl_output::Transform::_180 | wl_output::Transform::Flipped180 => 180.,
@@ -24,9 +51,11 @@ impl From<&OutputInfo> for DisplayInfo {
             .find(|m| m.current || m.preferred)
             .map(|m| m.refresh_rate as f32 / 1000.0)
             .unwrap_or(0.);
+
+        // logical_position is already in logical pixels; no further scaling needed.
         let (x, y) = info.logical_position.unwrap_or(info.location);
-        let (w, h) = info.logical_size.unwrap_or(info.physical_size);
         let (width_mm, height_mm) = info.physical_size;
+
         DisplayInfo {
             id: info.id,
             name: info.name.clone().unwrap_or_default(),
@@ -35,16 +64,16 @@ impl From<&OutputInfo> for DisplayInfo {
                 .clone()
                 .unwrap_or(format!("Unknown Display {}", info.id)),
             raw_handle: xcb::randr::Output::new(info.id),
-            x: ((x as f32) / scale_factor) as i32,
-            y: ((y as f32) / scale_factor) as i32,
-            width: ((w as f32) / scale_factor) as u32,
-            height: ((h as f32) / scale_factor) as u32,
+            x,
+            y,
+            width,
+            height,
             width_mm,
             height_mm,
             rotation,
             scale_factor,
             frequency,
-            is_primary: false,
+            is_primary: false, // resolved in get_all()
             is_builtin: false,
         }
     }
@@ -116,7 +145,7 @@ pub fn get_all() -> DIResult<Vec<DisplayInfo>> {
 
     event_queue.roundtrip(&mut list_outputs)?;
 
-    list_outputs
+    let mut infos = list_outputs
         .output_state
         .outputs()
         .map(|output| {
@@ -126,7 +155,15 @@ pub fn get_all() -> DIResult<Vec<DisplayInfo>> {
                 .map(|o| DisplayInfo::from(&o))
                 .ok_or(DIError::new("Cannot get info from Output in Wayland"))
         })
-        .collect::<DIResult<Vec<DisplayInfo>>>()
+        .collect::<DIResult<Vec<DisplayInfo>>>()?;
+
+    // Wayland has no primary output concept. Mark the display closest to the
+    // compositor origin as primary, which matches common desktop conventions.
+    if let Some(primary) = infos.iter_mut().min_by_key(|d| d.x.abs() + d.y.abs()) {
+        primary.is_primary = true;
+    }
+
+    Ok(infos)
 }
 
 pub fn get_from_point(x: i32, y: i32) -> DIResult<DisplayInfo> {
