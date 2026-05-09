@@ -28,6 +28,10 @@ impl From<&OutputInfo> for DisplayInfo {
         // Derive the true (possibly fractional) scale factor from the ratio of
         // physical pixels to logical pixels. wl_output::scale is always an integer
         // and does not reflect compositor-level fractional scaling.
+        // Round to 2 decimal places: the Wayland protocol truncates logical_size
+        // to integers, which introduces a small error (e.g. 2560/1969 = 1.30015
+        // instead of 1.30). Since scale factors are always set in whole percentages,
+        // rounding to 2 decimal places recovers the exact value.
         let scale_factor = info
             .logical_size
             .and_then(|(lw, _)| {
@@ -35,7 +39,7 @@ impl From<&OutputInfo> for DisplayInfo {
                     .iter()
                     .find(|m| m.current)
                     .filter(|_| lw != 0)
-                    .map(|m| m.dimensions.0 as f32 / lw as f32)
+                    .map(|m| (m.dimensions.0 as f32 / lw as f32 * 100.0).round() / 100.0)
             })
             .unwrap_or(info.scale_factor as f32);
 
